@@ -12,9 +12,19 @@ M5Canvas canvas(&M5.Display);
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Effect mode and animation variables
-uint8_t currentEffect = 0;  // 0 = Rainbow, 1 = Fire, 2 = Meteor, 3 = KITT
+uint8_t currentEffect = 4;  // 0 = Rainbow, 1 = Fire, 2 = Meteor, 3 = KITT, 4 = OFF
 uint16_t rainbowOffset = 0;
 uint16_t animationCounter = 0;
+uint8_t ledBrightness = 48;  // Current LED brightness (0-255)
+
+// Slider definition
+struct Slider {
+  int x, y, w, h;
+  int minVal, maxVal;
+  const char* label;
+};
+
+Slider brightnessSlider = {100, 690, 520, 60, 1, 255, "Brightness"};
 
 // Button definitions
 struct Button {
@@ -23,12 +33,16 @@ struct Button {
   uint32_t color;
 };
 
-Button buttons[4] = {
-  {160, 100, 400, 120, "RAINBOW", TFT_BLUE},
-  {160, 240, 400, 120, "FIRE", TFT_RED},
-  {160, 380, 400, 120, "METEOR", TFT_PURPLE},
-  {160, 520, 400, 120, "KITT", TFT_DARKGREY}
+Button buttons[5] = {
+  {160, 80, 400, 100, "RAINBOW", TFT_BLUE},
+  {160, 195, 400, 100, "FIRE", TFT_RED},
+  {160, 310, 400, 100, "METEOR", TFT_PURPLE},
+  {160, 425, 400, 100, "KITT", TFT_DARKGREY},
+  {160, 540, 400, 100, "OFF", TFT_BLACK}
 };
+
+// Forward declarations
+void drawSlider();
 
 // Helper function to generate rainbow colors
 uint32_t Wheel(byte WheelPos) {
@@ -53,15 +67,42 @@ void drawButtons() {
   
   // Title
   lcd.setTextColor(TFT_WHITE);
-  lcd.drawString("LED Effect Selector", lcd.width()/2, 80);
+  lcd.drawString("LED Effect Selector", lcd.width()/2, 40);
   
   // Draw all buttons
-  for(int i = 0; i < 4; i++) {
+  for(int i = 0; i < 5; i++) {
     // Highlight selected button
     uint32_t btnColor = (i == currentEffect) ? TFT_GREEN : buttons[i].color;
     lcd.fillRoundRect(buttons[i].x, buttons[i].y, buttons[i].w, buttons[i].h, 10, btnColor);
+    // OFF button needs white border for visibility
+    if(i == 4) {
+      lcd.drawRoundRect(buttons[i].x, buttons[i].y, buttons[i].w, buttons[i].h, 10, TFT_WHITE);
+    }
     lcd.setTextColor(TFT_WHITE);
     lcd.drawString(buttons[i].label, buttons[i].x + buttons[i].w/2, buttons[i].y + buttons[i].h/2);
+  }
+  
+  // Draw brightness slider
+  drawSlider();
+}
+
+// Draw the brightness slider
+void drawSlider() {
+  auto& lcd = M5.Display;
+  lcd.setTextSize(3);
+  lcd.setTextColor(TFT_WHITE);
+  lcd.setTextDatum(textdatum_t::middle_center);
+  
+  // Label
+  lcd.drawString(brightnessSlider.label, brightnessSlider.x + brightnessSlider.w/2, brightnessSlider.y - 25);
+  
+  // Slider track
+  lcd.fillRoundRect(brightnessSlider.x, brightnessSlider.y, brightnessSlider.w, brightnessSlider.h, 5, TFT_DARKGREY);
+  
+  // Slider fill (based on brightness value)
+  int fillWidth = map(ledBrightness, brightnessSlider.minVal, brightnessSlider.maxVal, 0, brightnessSlider.w);
+  if(fillWidth > 0) {
+    lcd.fillRoundRect(brightnessSlider.x, brightnessSlider.y, fillWidth, brightnessSlider.h, 5, TFT_ORANGE);
   }
 }
 
@@ -207,7 +248,7 @@ void setup() {
   // NeoPixel
   strip.begin();
   strip.clear();
-  strip.setBrightness(48);
+  strip.setBrightness(ledBrightness);
   strip.show();
   
   // Draw initial UI
@@ -220,14 +261,38 @@ void loop() {
   // Check for touch input
   if(M5.Touch.getCount()) {
     auto touch = M5.Touch.getDetail();
+    
+    // Check for button presses
     if(touch.wasPressed()) {
       // Check which button was pressed
-      for(int i = 0; i < 4; i++) {
+      for(int i = 0; i < 5; i++) {
         if(touch.x >= buttons[i].x && touch.x <= buttons[i].x + buttons[i].w &&
            touch.y >= buttons[i].y && touch.y <= buttons[i].y + buttons[i].h) {
           currentEffect = i;
+          // Clear LEDs when OFF is selected
+          if(currentEffect == 4) {
+            strip.clear();
+            strip.show();
+          }
           drawButtons();  // Redraw to show selection
           break;
+        }
+      }
+    }
+    
+    // Check for slider interaction (both press and drag)
+    if(touch.isPressed() || touch.wasPressed()) {
+      if(touch.y >= brightnessSlider.y && touch.y <= brightnessSlider.y + brightnessSlider.h &&
+         touch.x >= brightnessSlider.x && touch.x <= brightnessSlider.x + brightnessSlider.w) {
+        // Calculate new brightness based on touch position
+        int newBrightness = map(touch.x, brightnessSlider.x, brightnessSlider.x + brightnessSlider.w, 
+                               brightnessSlider.minVal, brightnessSlider.maxVal);
+        newBrightness = constrain(newBrightness, brightnessSlider.minVal, brightnessSlider.maxVal);
+        
+        if(newBrightness != ledBrightness) {
+          ledBrightness = newBrightness;
+          strip.setBrightness(ledBrightness);
+          drawSlider();  // Update slider display
         }
       }
     }
@@ -246,6 +311,9 @@ void loop() {
       break;
     case 3:
       kittEffect();
+      break;
+    case 4:
+      // OFF - do nothing, LEDs stay cleared
       break;
   }
   
