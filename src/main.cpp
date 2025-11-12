@@ -12,37 +12,45 @@ M5Canvas canvas(&M5.Display);
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Effect mode and animation variables
-uint8_t currentEffect = 4;  // 0 = Rainbow, 1 = Fire, 2 = Meteor, 3 = KITT, 4 = OFF
+uint8_t currentEffect = 5;  // 0 = Rainbow, 1 = Fire, 2 = Meteor, 3 = KITT, 4 = OFF
 uint16_t rainbowOffset = 0;
 uint16_t animationCounter = 0;
-uint8_t ledBrightness = 48;  // Current LED brightness (0-255)
+uint8_t ledBrightness = 191;  // Current LED brightness (0-255), 75% = ~191
 
-// Slider definition
-struct Slider {
-  int x, y, w, h;
-  int minVal, maxVal;
-  const char* label;
-};
+// Color definitions for the modern dark theme
+#define BG_COLOR 0x20E4  // Dark gray background (RGB: 33, 37, 41)
+#define CARD_COLOR 0x39C7  // Slightly lighter card background
+#define TEXT_WHITE 0xFFFF
+#define SLIDER_BG 0x4228  // Dark slider background
+#define SLIDER_FILL 0x0D7F  // Blue slider fill
+#define OFF_BUTTON_COLOR 0x0D7F  // Blue for off button
 
-Slider brightnessSlider = {100, 690, 520, 60, 1, 255, "Brightness"};
-
-// Button definitions
+// Button definitions for 2x2 grid layout
 struct Button {
   int x, y, w, h;
   const char* label;
-  uint32_t color;
+  bool selected;
 };
 
-Button buttons[5] = {
-  {160, 80, 400, 100, "RAINBOW", TFT_BLUE},
-  {160, 195, 400, 100, "FIRE", TFT_RED},
-  {160, 310, 400, 100, "METEOR", TFT_PURPLE},
-  {160, 425, 400, 100, "KITT", TFT_DARKGREY},
-  {160, 540, 400, 100, "OFF", TFT_BLACK}
+// Effect buttons in 2x2 grid
+Button effectButtons[4] = {
+  {60, 190, 280, 280, "Rainbow", false},   // Top-left
+  {380, 190, 280, 280, "Fire", false},     // Top-right
+  {60, 490, 280, 280, "Meteor", false},    // Bottom-left
+  {380, 490, 280, 280, "KITT", false}      // Bottom-right
 };
+
+// Off button at bottom
+Button offButton = {60, 950, 600, 100, "Off", false};
 
 // Forward declarations
-void drawSlider();
+void drawInterface();
+void drawHeader();
+void drawEffectButtons();
+void drawBrightnessSlider();
+void drawOffButton();
+void drawGradientBackground(int x, int y, int w, int h, int effectType);
+void updateButtonSelection(int oldSelection, int newSelection);
 
 // Helper function to generate rainbow colors
 uint32_t Wheel(byte WheelPos) {
@@ -58,51 +66,252 @@ uint32_t Wheel(byte WheelPos) {
   return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
 }
 
-// Draw buttons on screen
-void drawButtons() {
+// Draw gradient backgrounds for effect buttons
+void drawGradientBackground(int x, int y, int w, int h, int effectType) {
   auto& lcd = M5.Display;
-  lcd.fillScreen(TFT_BLACK);
-  lcd.setTextDatum(textdatum_t::middle_center);
-  lcd.setTextSize(3);
+  
+  // First draw the rounded rectangle background
+  lcd.fillRoundRect(x, y, w, h, 15, CARD_COLOR);
+  
+  switch(effectType) {
+    case 0: { // Rainbow gradient - optimized with bands instead of pixels
+      // Draw rainbow bands inside the button area with padding
+      int innerX = x + 5;
+      int innerY = y + 5;
+      int innerW = w - 10;
+      int innerH = h - 10;
+      
+      int bands = 8;
+      for(int i = 0; i < bands; i++) {
+        float hue = (float)i / bands;
+        uint8_t r = (sin(hue * 6.28318 + 0) * 127 + 128);
+        uint8_t g = (sin(hue * 6.28318 + 2.094395) * 127 + 128);
+        uint8_t b = (sin(hue * 6.28318 + 4.18879) * 127 + 128);
+        uint16_t color = lcd.color565(r, g, b);
+        
+        // Draw vertical bands for simplicity
+        int bandX = innerX + (i * innerW / bands);
+        int bandWidth = innerW / bands + 1;
+        lcd.fillRect(bandX, innerY, bandWidth, innerH - 30, color);
+      }
+      break;
+    }
+      
+    case 1: { // Fire gradient (orange to red)
+      // First ensure we have a dark rounded background
+      lcd.fillRoundRect(x, y, w, h, 15, lcd.color565(100, 20, 0));
+      // Draw gradient inside the button with padding
+      for(int i = 0; i < h - 35; i++) {
+        float gradient = (float)i / (h - 35);
+        uint8_t r = 255;
+        uint8_t g = 140 - (gradient * 100);
+        uint8_t b = 0;
+        uint16_t color = lcd.color565(r, g, b);
+        lcd.fillRect(x + 5, y + 5 + i, w - 10, 1, color);
+      }
+      break;
+    }
+      
+    case 2: // Meteor (dark with streaks)
+      // Draw diagonal streaks inside the button
+      lcd.fillRoundRect(x, y, w, h, 15, 0x2104);  // Very dark background
+      for(int i = 0; i < 4; i++) {
+        int sx = x + 20 + i * 60;
+        int sy = y + 10;
+        lcd.drawLine(sx, sy, sx + 80, sy + h - 40, 0xC618);
+        lcd.drawLine(sx + 1, sy, sx + 81, sy + h - 40, 0x8410);
+      }
+      break;
+      
+    case 3: { // KITT (black with red scanner)
+      lcd.fillRoundRect(x, y, w, h, 15, TFT_BLACK);
+      // Draw red scanner bar
+      int barY = y + h - 60;
+      lcd.fillRect(x + 20, barY, w - 40, 8, TFT_RED);
+      // Add glow effect
+      lcd.fillRect(x + 20, barY - 4, w - 40, 4, lcd.color565(128, 0, 0));
+      lcd.fillRect(x + 20, barY + 8, w - 40, 4, lcd.color565(128, 0, 0));
+      break;
+    }
+  }
+}
+
+// Draw the main interface
+void drawInterface() {
+  auto& lcd = M5.Display;
+  lcd.fillScreen(BG_COLOR);
+  
+  drawHeader();
+  drawEffectButtons();
+  drawBrightnessSlider();
+  drawOffButton();
+}
+
+// Draw the header with title and icons
+void drawHeader() {
+  auto& lcd = M5.Display;
+  
+  // Draw WiFi icon (simplified)
+  lcd.setTextColor(0x07E0);  // Green for WiFi
+  lcd.fillCircle(60, 70, 4, 0x07E0);
+  lcd.drawCircle(60, 70, 12, 0x07E0);
+  lcd.drawCircle(60, 70, 20, 0x07E0);
+  lcd.drawCircle(60, 70, 28, 0x07E0);
   
   // Title
-  lcd.setTextColor(TFT_WHITE);
-  lcd.drawString("LED Effect Selector", lcd.width()/2, 40);
+  lcd.setTextDatum(textdatum_t::middle_center);
+  lcd.setTextColor(TEXT_WHITE);
+  lcd.setTextSize(4);
+  lcd.drawString("LED Control", lcd.width()/2, 70);
   
-  // Draw all buttons
-  for(int i = 0; i < 5; i++) {
-    // Highlight selected button
-    uint32_t btnColor = (i == currentEffect) ? TFT_GREEN : buttons[i].color;
-    lcd.fillRoundRect(buttons[i].x, buttons[i].y, buttons[i].w, buttons[i].h, 10, btnColor);
-    // OFF button needs white border for visibility
-    if(i == 4) {
-      lcd.drawRoundRect(buttons[i].x, buttons[i].y, buttons[i].w, buttons[i].h, 10, TFT_WHITE);
-    }
-    lcd.setTextColor(TFT_WHITE);
-    lcd.drawString(buttons[i].label, buttons[i].x + buttons[i].w/2, buttons[i].y + buttons[i].h/2);
+  // Settings icon (gear - simplified)
+  lcd.fillCircle(660, 70, 20, 0x7BEF);  // Gray gear
+  lcd.fillCircle(660, 70, 12, BG_COLOR);  // Inner hole
+  // Gear teeth
+  for(int i = 0; i < 8; i++) {
+    float angle = i * 0.785398;  // 45 degrees in radians
+    int x1 = 660 + cos(angle) * 18;
+    int y1 = 70 + sin(angle) * 18;
+    int x2 = 660 + cos(angle) * 24;
+    int y2 = 70 + sin(angle) * 24;
+    lcd.drawLine(x1, y1, x2, y2, 0x7BEF);
+    lcd.drawLine(x1+1, y1, x2+1, y2, 0x7BEF);
+    lcd.drawLine(x1, y1+1, x2, y2+1, 0x7BEF);
   }
   
-  // Draw brightness slider
-  drawSlider();
+  // "Effects" label
+  lcd.setTextDatum(textdatum_t::top_left);
+  lcd.setTextSize(3);
+  lcd.setTextColor(TEXT_WHITE);
+  lcd.drawString("Effects", 60, 140);
+}
+
+// Draw the 2x2 grid of effect buttons
+void drawEffectButtons() {
+  auto& lcd = M5.Display;
+  
+  for(int i = 0; i < 4; i++) {
+    // Draw gradient background
+    drawGradientBackground(effectButtons[i].x, effectButtons[i].y, 
+                          effectButtons[i].w, effectButtons[i].h, i);
+    
+    // Draw selection border if selected
+    if(i == currentEffect) {
+      lcd.drawRoundRect(effectButtons[i].x - 2, effectButtons[i].y - 2, 
+                       effectButtons[i].w + 4, effectButtons[i].h + 4, 15, TEXT_WHITE);
+      lcd.drawRoundRect(effectButtons[i].x - 3, effectButtons[i].y - 3, 
+                       effectButtons[i].w + 6, effectButtons[i].h + 6, 15, TEXT_WHITE);
+    }
+    
+    // Draw label at bottom of each button
+    lcd.setTextDatum(textdatum_t::bottom_center);
+    lcd.setTextSize(3);
+    lcd.setTextColor(TEXT_WHITE);
+    lcd.drawString(effectButtons[i].label, 
+                  effectButtons[i].x + effectButtons[i].w/2, 
+                  effectButtons[i].y + effectButtons[i].h - 10);
+  }
 }
 
 // Draw the brightness slider
-void drawSlider() {
+void drawBrightnessSlider() {
   auto& lcd = M5.Display;
+  
+  // Static variable to track last handle position
+  static int lastHandleX = -1;
+  
+  // "Brightness" label (only draw if not already there)
+  if(lastHandleX == -1) {
+    lcd.setTextDatum(textdatum_t::top_left);
+    lcd.setTextSize(3);
+    lcd.setTextColor(TEXT_WHITE);
+    lcd.drawString("Brightness", 60, 820);
+  }
+  
+  // Percentage value - clear old value first
+  lcd.fillRect(580, 820, 80, 30, BG_COLOR);
+  lcd.setTextDatum(textdatum_t::top_right);
   lcd.setTextSize(3);
-  lcd.setTextColor(TFT_WHITE);
+  lcd.setTextColor(TEXT_WHITE);
+  int percentage = map(ledBrightness, 0, 255, 0, 100);
+  char percStr[10];
+  sprintf(percStr, "%d%%", percentage);
+  lcd.drawString(percStr, 660, 820);
+  
+  // Slider track position
+  int sliderY = 870;
+  int sliderX = 60;
+  int sliderW = 600;
+  int sliderH = 8;
+  
+  // Calculate new handle position
+  int fillWidth = map(ledBrightness, 0, 255, 0, sliderW);
+  int newHandleX = sliderX + fillWidth;
+  
+  // Only redraw if handle moved
+  if(lastHandleX != newHandleX) {
+    // Clear the entire slider area including handle space (bigger clear area)
+    lcd.fillRect(sliderX - 25, sliderY - 25, sliderW + 50, 50, BG_COLOR);
+    
+    // Redraw slider track
+    lcd.fillRoundRect(sliderX, sliderY, sliderW, sliderH, 4, SLIDER_BG);
+    
+    // Draw slider fill
+    if(fillWidth > 0) {
+      lcd.fillRoundRect(sliderX, sliderY, fillWidth, sliderH, 4, SLIDER_FILL);
+    }
+    
+    // Draw new handle
+    lcd.fillCircle(newHandleX, sliderY + sliderH/2, 18, SLIDER_FILL);
+    lcd.drawCircle(newHandleX, sliderY + sliderH/2, 18, TEXT_WHITE);
+    
+    lastHandleX = newHandleX;
+  }
+}
+
+// Draw the Off button
+void drawOffButton() {
+  auto& lcd = M5.Display;
+  
+  // Draw button background
+  if(currentEffect == 4) {
+    lcd.fillRoundRect(offButton.x, offButton.y, offButton.w, offButton.h, 20, 0x4228);
+    lcd.drawRoundRect(offButton.x, offButton.y, offButton.w, offButton.h, 20, TEXT_WHITE);
+  } else {
+    lcd.fillRoundRect(offButton.x, offButton.y, offButton.w, offButton.h, 20, OFF_BUTTON_COLOR);
+  }
+  
+  // Draw button text
   lcd.setTextDatum(textdatum_t::middle_center);
+  lcd.setTextSize(4);
+  lcd.setTextColor(TEXT_WHITE);
+  lcd.drawString("Off", offButton.x + offButton.w/2, offButton.y + offButton.h/2);
+}
+
+// Update only the selection borders without redrawing everything
+void updateButtonSelection(int oldSelection, int newSelection) {
+  auto& lcd = M5.Display;
   
-  // Label
-  lcd.drawString(brightnessSlider.label, brightnessSlider.x + brightnessSlider.w/2, brightnessSlider.y - 25);
+  // Clear old selection border for effect buttons (0-3)
+  if(oldSelection >= 0 && oldSelection < 4) {
+    // Draw over the old border with background color
+    lcd.drawRoundRect(effectButtons[oldSelection].x - 2, effectButtons[oldSelection].y - 2, 
+                     effectButtons[oldSelection].w + 4, effectButtons[oldSelection].h + 4, 15, BG_COLOR);
+    lcd.drawRoundRect(effectButtons[oldSelection].x - 3, effectButtons[oldSelection].y - 3, 
+                     effectButtons[oldSelection].w + 6, effectButtons[oldSelection].h + 6, 15, BG_COLOR);
+  }
   
-  // Slider track
-  lcd.fillRoundRect(brightnessSlider.x, brightnessSlider.y, brightnessSlider.w, brightnessSlider.h, 5, TFT_DARKGREY);
+  // Draw new selection border for effect buttons (0-3)
+  if(newSelection >= 0 && newSelection < 4) {
+    lcd.drawRoundRect(effectButtons[newSelection].x - 2, effectButtons[newSelection].y - 2, 
+                     effectButtons[newSelection].w + 4, effectButtons[newSelection].h + 4, 15, TEXT_WHITE);
+    lcd.drawRoundRect(effectButtons[newSelection].x - 3, effectButtons[newSelection].y - 3, 
+                     effectButtons[newSelection].w + 6, effectButtons[newSelection].h + 6, 15, TEXT_WHITE);
+  }
   
-  // Slider fill (based on brightness value)
-  int fillWidth = map(ledBrightness, brightnessSlider.minVal, brightnessSlider.maxVal, 0, brightnessSlider.w);
-  if(fillWidth > 0) {
-    lcd.fillRoundRect(brightnessSlider.x, brightnessSlider.y, fillWidth, brightnessSlider.h, 5, TFT_ORANGE);
+  // Update Off button appearance if needed
+  if((oldSelection == 4 && newSelection != 4) || (oldSelection != 4 && newSelection == 4)) {
+    drawOffButton();
   }
 }
 
@@ -243,7 +452,7 @@ void setup() {
   auto& lcd = M5.Display;     // single display owner
   lcd.setColorDepth(16);      // RGB565
   lcd.setSwapBytes(false);    // if you still get green, change to 'true'
-  lcd.fillScreen(TFT_BLACK);
+  lcd.fillScreen(BG_COLOR);
 
   // NeoPixel
   strip.begin();
@@ -252,7 +461,7 @@ void setup() {
   strip.show();
   
   // Draw initial UI
-  drawButtons();
+  drawInterface();
 }
 
 void loop() {
@@ -264,35 +473,49 @@ void loop() {
     
     // Check for button presses
     if(touch.wasPressed()) {
-      // Check which button was pressed
-      for(int i = 0; i < 5; i++) {
-        if(touch.x >= buttons[i].x && touch.x <= buttons[i].x + buttons[i].w &&
-           touch.y >= buttons[i].y && touch.y <= buttons[i].y + buttons[i].h) {
-          currentEffect = i;
-          // Clear LEDs when OFF is selected
-          if(currentEffect == 4) {
-            strip.clear();
-            strip.show();
+      // Check which effect button was pressed
+      for(int i = 0; i < 4; i++) {
+        if(touch.x >= effectButtons[i].x && touch.x <= effectButtons[i].x + effectButtons[i].w &&
+           touch.y >= effectButtons[i].y && touch.y <= effectButtons[i].y + effectButtons[i].h) {
+          if(currentEffect != i) {  // Only update if selection changed
+            int oldEffect = currentEffect;
+            currentEffect = i;
+            updateButtonSelection(oldEffect, currentEffect);  // Just update borders
           }
-          drawButtons();  // Redraw to show selection
           break;
+        }
+      }
+      
+      // Check if Off button was pressed
+      if(touch.x >= offButton.x && touch.x <= offButton.x + offButton.w &&
+         touch.y >= offButton.y && touch.y <= offButton.y + offButton.h) {
+        if(currentEffect != 4) {  // Only update if not already OFF
+          int oldEffect = currentEffect;
+          currentEffect = 4;  // Set to OFF mode
+          strip.clear();
+          strip.show();
+          updateButtonSelection(oldEffect, currentEffect);  // Just update selection
         }
       }
     }
     
     // Check for slider interaction (both press and drag)
     if(touch.isPressed() || touch.wasPressed()) {
-      if(touch.y >= brightnessSlider.y && touch.y <= brightnessSlider.y + brightnessSlider.h &&
-         touch.x >= brightnessSlider.x && touch.x <= brightnessSlider.x + brightnessSlider.w) {
+      int sliderX = 60;
+      int sliderY = 870;
+      int sliderW = 600;
+      int sliderH = 40;  // Increased hit area for easier interaction
+      
+      if(touch.y >= sliderY - 16 && touch.y <= sliderY + sliderH &&
+         touch.x >= sliderX && touch.x <= sliderX + sliderW) {
         // Calculate new brightness based on touch position
-        int newBrightness = map(touch.x, brightnessSlider.x, brightnessSlider.x + brightnessSlider.w, 
-                               brightnessSlider.minVal, brightnessSlider.maxVal);
-        newBrightness = constrain(newBrightness, brightnessSlider.minVal, brightnessSlider.maxVal);
+        int newBrightness = map(touch.x, sliderX, sliderX + sliderW, 0, 255);
+        newBrightness = constrain(newBrightness, 0, 255);
         
         if(newBrightness != ledBrightness) {
           ledBrightness = newBrightness;
           strip.setBrightness(ledBrightness);
-          drawSlider();  // Update slider display
+          drawBrightnessSlider();  // Update slider display
         }
       }
     }
