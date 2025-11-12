@@ -3,11 +3,30 @@
 #include <Adafruit_NeoPixel.h>
 
 #define LED_PIN   54
-#define NUM_LEDS  1
+#define NUM_LEDS  144
+
+// Display	5 Inch IPS TFT (1280×720, 720P), Driver IC: ST7123
 
 // Canvas is tied to the single, M5Unified-owned display
 M5Canvas canvas(&M5.Display);
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// Rainbow animation variables
+uint16_t rainbowOffset = 0;
+
+// Helper function to generate rainbow colors
+uint32_t Wheel(byte WheelPos) {
+  WheelPos = 255 - WheelPos;
+  if(WheelPos < 85) {
+    return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  }
+  if(WheelPos < 170) {
+    WheelPos -= 85;
+    return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+  WheelPos -= 170;
+  return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
 
 void setup() {
   auto cfg = M5.config();
@@ -39,13 +58,17 @@ void setup() {
 }
 
 void loop() {
-  // Blink first pixel on GPIO 54
-  strip.setPixelColor(0, strip.Color(255, 0, 0));
+  // Create moving rainbow effect
+  for(int i = 0; i < NUM_LEDS; i++) {
+    // Calculate color based on position and offset
+    int pixelHue = ((i * 256 / NUM_LEDS) + rainbowOffset) & 255;
+    strip.setPixelColor(i, Wheel(pixelHue));
+  }
   strip.show();
-  delay(500);
-  strip.setPixelColor(0, 0);
-  strip.show();
-  delay(500);
-
+  
+  // Move the rainbow
+  rainbowOffset = (rainbowOffset + 1) & 255;
+  
+  delay(20);  // Adjust speed of rainbow movement
   M5.update();
 }
