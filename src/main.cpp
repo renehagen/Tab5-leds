@@ -12,10 +12,11 @@ M5Canvas canvas(&M5.Display);
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Effect mode and animation variables
-uint8_t currentEffect = 5;  // 0 = Rainbow, 1 = Fire, 2 = Meteor, 3 = KITT, 4 = OFF
+uint8_t currentEffect = 5;  // 0 = Rainbow, 1 = Fire, 2 = Meteor, 3 = KITT, 4 = OFF, 5 = Solid Color
 uint16_t rainbowOffset = 0;
 uint16_t animationCounter = 0;
-uint8_t ledBrightness = 191;  // Current LED brightness (0-255), 75% = ~191
+uint8_t ledBrightness = 128;  // Current LED brightness (0-255), 50% = 128
+uint32_t solidColor = 0;  // Stored solid color for effect 5
 
 // Color definitions for the modern dark theme
 #define BG_COLOR 0x20E4  // Dark gray background (RGB: 33, 37, 41)
@@ -41,16 +42,18 @@ Button effectButtons[4] = {
 };
 
 // Off button at bottom
-Button offButton = {60, 950, 600, 100, "Off", false};
+Button offButton = {60, 1070, 600, 100, "Off", false};
 
 // Forward declarations
 void drawInterface();
 void drawHeader();
 void drawEffectButtons();
 void drawBrightnessSlider();
+void drawColorCircles();
 void drawOffButton();
 void drawGradientBackground(int x, int y, int w, int h, int effectType);
 void updateButtonSelection(int oldSelection, int newSelection);
+void solidColorEffect();
 
 // Helper function to generate rainbow colors
 uint32_t Wheel(byte WheelPos) {
@@ -143,6 +146,7 @@ void drawInterface() {
   
   drawHeader();
   drawEffectButtons();
+  drawColorCircles();
   drawBrightnessSlider();
   drawOffButton();
 }
@@ -213,6 +217,39 @@ void drawEffectButtons() {
   }
 }
 
+// Draw color selection circles above brightness slider
+void drawColorCircles() {
+  auto& lcd = M5.Display;
+  
+  // Calculate the 8 rainbow colors (same as used in rainbow button)
+  uint32_t rainbowColors[8];
+  int circleY = 850;  // Y position above brightness slider (25px spacing above and below)
+  int startX = 80;
+  int spacing = 75;
+  int radius = 25;
+  
+  // Generate the same 8 colors used in the rainbow effect
+  for(int i = 0; i < 8; i++) {
+    float hue = (float)i / 8;
+    uint8_t r = (sin(hue * 6.28318 + 0) * 127 + 128);
+    uint8_t g = (sin(hue * 6.28318 + 2.094395) * 127 + 128);
+    uint8_t b = (sin(hue * 6.28318 + 4.18879) * 127 + 128);
+    
+    // Store as RGB565 color for display
+    uint16_t color565 = lcd.color565(r, g, b);
+    
+    // Store as NeoPixel color (RGB format)
+    rainbowColors[i] = strip.Color(r, g, b);
+    
+    // Draw the circle
+    int circleX = startX + (i * spacing);
+    lcd.fillCircle(circleX, circleY, radius, color565);
+    
+    // Add white border for better visibility
+    lcd.drawCircle(circleX, circleY, radius, TEXT_WHITE);
+  }
+}
+
 // Draw the brightness slider
 void drawBrightnessSlider() {
   auto& lcd = M5.Display;
@@ -225,21 +262,21 @@ void drawBrightnessSlider() {
     lcd.setTextDatum(textdatum_t::top_left);
     lcd.setTextSize(3);
     lcd.setTextColor(TEXT_WHITE);
-    lcd.drawString("Brightness", 60, 820);
+    lcd.drawString("Brightness", 60, 920);
   }
   
   // Percentage value - clear old value first
-  lcd.fillRect(580, 820, 80, 30, BG_COLOR);
+  lcd.fillRect(580, 920, 80, 30, BG_COLOR);
   lcd.setTextDatum(textdatum_t::top_right);
   lcd.setTextSize(3);
   lcd.setTextColor(TEXT_WHITE);
   int percentage = map(ledBrightness, 0, 255, 0, 100);
   char percStr[10];
   sprintf(percStr, "%d%%", percentage);
-  lcd.drawString(percStr, 660, 820);
+  lcd.drawString(percStr, 660, 920);
   
   // Slider track position
-  int sliderY = 870;
+  int sliderY = 970;
   int sliderX = 60;
   int sliderW = 600;
   int sliderH = 8;
@@ -441,6 +478,13 @@ void kittEffect() {
   }
 }
 
+// Solid color effect - fill entire strip with selected color
+void solidColorEffect() {
+  for(int i = 0; i < NUM_LEDS; i++) {
+    strip.setPixelColor(i, solidColor);
+  }
+}
+
 void setup() {
   auto cfg = M5.config();
   cfg.output_power  = true;   // keep Grove 5V on
@@ -473,6 +517,42 @@ void loop() {
     
     // Check for button presses
     if(touch.wasPressed()) {
+      // Check for color circle taps
+      int circleY = 820;
+      int startX = 80;
+      int spacing = 75;
+      int radius = 25;
+      int hitRadius = 40;  // Larger hit radius for easier tapping
+      
+      for(int i = 0; i < 8; i++) {
+        int circleX = startX + (i * spacing);
+        int dx = touch.x - circleX;
+        int dy = touch.y - circleY;
+        int distance = sqrt(dx*dx + dy*dy);
+        
+        if(distance <= hitRadius) {
+          // Calculate the color for this circle (same as in drawColorCircles)
+          float hue = (float)i / 8;
+          uint8_t r = (sin(hue * 6.28318 + 0) * 127 + 128);
+          uint8_t g = (sin(hue * 6.28318 + 2.094395) * 127 + 128);
+          uint8_t b = (sin(hue * 6.28318 + 4.18879) * 127 + 128);
+          
+          // Set solid color and switch to solid color effect
+          solidColor = strip.Color(r, g, b);
+          int oldEffect = currentEffect;
+          currentEffect = 5;  // Solid color mode
+          
+          // Fill strip immediately
+          for(int led = 0; led < NUM_LEDS; led++) {
+            strip.setPixelColor(led, solidColor);
+          }
+          strip.show();
+          
+          updateButtonSelection(oldEffect, currentEffect);
+          break;
+        }
+      }
+      
       // Check which effect button was pressed
       for(int i = 0; i < 4; i++) {
         if(touch.x >= effectButtons[i].x && touch.x <= effectButtons[i].x + effectButtons[i].w &&
@@ -502,11 +582,11 @@ void loop() {
     // Check for slider interaction (both press and drag)
     if(touch.isPressed() || touch.wasPressed()) {
       int sliderX = 60;
-      int sliderY = 870;
+      int sliderY = 920;
       int sliderW = 600;
-      int sliderH = 40;  // Increased hit area for easier interaction
+      int sliderH = 60;  // Increased hit area for easier interaction (bigger touch radius)
       
-      if(touch.y >= sliderY - 16 && touch.y <= sliderY + sliderH &&
+      if(touch.y >= sliderY - 30 && touch.y <= sliderY + sliderH &&
          touch.x >= sliderX && touch.x <= sliderX + sliderW) {
         // Calculate new brightness based on touch position
         int newBrightness = map(touch.x, sliderX, sliderX + sliderW, 0, 255);
@@ -537,6 +617,9 @@ void loop() {
       break;
     case 4:
       // OFF - do nothing, LEDs stay cleared
+      break;
+    case 5:
+      solidColorEffect();
       break;
   }
   
